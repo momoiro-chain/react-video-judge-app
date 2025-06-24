@@ -101,8 +101,12 @@ const VideoRecorderWithTimer = ({
         };
         recorder.onstop = () => {
           const blob = new Blob(chunks, { type: "video/webm" });
-          onRecordingComplete?.(blob);
+          // 第2引数で FPS も渡す
+          if (onRecordingComplete) {
+            onRecordingComplete(blob, captureFps);
+          }
         };
+
         mediaRecorderRef.current = recorder;
       } catch (err) {
         console.error("ストリームセットアップ失敗:", err);

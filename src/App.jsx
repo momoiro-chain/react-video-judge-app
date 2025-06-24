@@ -4,6 +4,7 @@ import VideoPlayer from "./components/videoPlayer";
 
 function App() {
   const [recordedBlob, setRecordedBlob] = useState(null);
+  const [recordedFps, setRecordedFps] = useState(30);
 
   return (
     <div style={{ padding: 20 }}>
@@ -14,10 +15,11 @@ function App() {
         lineColor="#00ff00"
         lineWidth={4}
         lineOpacity={0.7}
-        fps={24}
         downloadFileName="my_recording.webm"
-        onRecordingComplete={(blob) => {
+        // 録画完了時に Blob と選択した FPS を受け取る
+        onRecordingComplete={(blob, fps) => {
           setRecordedBlob(blob);
+          setRecordedFps(fps);
         }}
       />
 
@@ -26,7 +28,8 @@ function App() {
           <h2>録画結果プレビュー</h2>
           <VideoPlayer
             videoFile={recordedBlob}
-            initialFrameRate={24}
+            // 録画時の FPS をコマ送りに反映
+            initialFrameRate={recordedFps}
             onClick={(e, videoEl) => {
               console.log("Video clicked at", e.clientX, e.clientY);
             }}

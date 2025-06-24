@@ -1,58 +1,56 @@
 import React, { useRef, useState, useEffect } from "react";
 
 const VideoRecorderWithTimer = ({
-  width = 400, // プレビュー横幅(px)
-  lineColor = "lightgreen", // 縦線の色
-  lineWidth = 2, // 縦線の太さ(px)
-  lineOpacity = 0.8, // 縦線の透過度(0〜1)
-  fps = 30, // プレビュー＆録画のFPS
+  width = 400,
+  lineColor = "lightgreen",
+  lineWidth = 2,
+  lineOpacity = 0.8,
+  fps = 30,
   downloadFileName = "recording_with_line.webm",
-  onRecordingComplete, // 録画完了時に Blob を受け取るコールバック
+  onRecordingComplete, // Blob を親に渡すコールバック
 }) => {
-  const videoInputRef = useRef(null); // 非表示でカメラ映像を受け取る
-  const canvasRef = useRef(null); // 焼き込み＆プレビュー用
-  const mediaRecorderRef = useRef(null); // MediaRecorder インスタンス
-  const timerRef = useRef(null); // ストップウォッチ用 Interval
+  const videoInputRef = useRef(null);
+  const canvasRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const timerRef = useRef(null);
 
   const [facingMode, setFacingMode] = useState("user"); // "user" or "environment"
   const [isRecording, setIsRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // ——————————————
-  // カメラ切り替え or パラメータ変化時にストリームを再構築
   useEffect(() => {
-    let animationId = null;
-    let currentStream = null;
+    let animationId;
+    let currentStream;
 
     async function setupStream() {
-      // 既存ストリームがあれば停止
+      // 既存ストリームを停止
       if (currentStream) {
         currentStream.getTracks().forEach((t) => t.stop());
       }
 
       try {
-        // facingMode でカメラを指定
+        // facingMode で前面／背面カメラを指定
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: facingMode } },
           audio: true,
         });
         currentStream = stream;
 
-        // 非表示 <video> にストリームをセット＆再生
+        // 非表示の <video> にセットして再生
         const vidIn = videoInputRef.current;
         vidIn.srcObject = stream;
-        vidIn.muted = true; // インライン自動再生許可のためミュート
+        vidIn.muted = true;
         vidIn.playsInline = true;
         await vidIn.play();
 
-        // <canvas> をビデオサイズに合わせる
+        // <canvas> サイズ合わせ
         const canvas = canvasRef.current;
         canvas.width = vidIn.videoWidth;
         canvas.height = vidIn.videoHeight;
         const ctx = canvas.getContext("2d");
 
-        // 毎フレーム：映像→縦線を描画
+        // 毎フレーム、ビデオ＋縦線を描画
         function drawFrame() {
           ctx.drawImage(vidIn, 0, 0, canvas.width, canvas.height);
           const x = (canvas.width - lineWidth) / 2;
@@ -64,59 +62,60 @@ const VideoRecorderWithTimer = ({
         }
         drawFrame();
 
-        // canvas＋音声を混合したストリームを録画用に生成
+        // canvas映像 + 音声を混合したストリームを生成
         const canvasStream = canvas.captureStream(fps);
         const mixedStream = new MediaStream([
           ...canvasStream.getVideoTracks(),
           ...stream.getAudioTracks(),
         ]);
 
-        // MediaRecorder 初期化
+        // MediaRecorder のローカルチャンク配列
+        const chunks = [];
         const recorder = new MediaRecorder(mixedStream, {
           mimeType: "video/webm; codecs=vp8,opus",
         });
+
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) {
-            setRecordedChunks((prev) => [...prev, e.data]);
+            chunks.push(e.data);
+            setRecordedChunks([...chunks]);
           }
         };
+
         recorder.onstop = () => {
-          const blob = new Blob(recordedChunks, { type: "video/webm" });
+          // 録画終了時に最新のチャンクから Blob を作成
+          const blob = new Blob(chunks, { type: "video/webm" });
           if (onRecordingComplete) {
             onRecordingComplete(blob);
           }
         };
+
         mediaRecorderRef.current = recorder;
       } catch (err) {
-        console.error("カメラストリームのセットアップに失敗:", err);
+        console.error("ストリームセットアップ失敗:", err);
       }
     }
 
     setupStream();
-
     return () => {
       if (animationId) cancelAnimationFrame(animationId);
       if (currentStream) currentStream.getTracks().forEach((t) => t.stop());
     };
   }, [facingMode, fps, lineColor, lineWidth, lineOpacity, onRecordingComplete]);
 
-  // ——————————————
-  // 録画開始
   const startRecording = () => {
     const rec = mediaRecorderRef.current;
     if (!rec) return;
     setRecordedChunks([]);
     rec.start();
     setIsRecording(true);
-
-    const startTs = Date.now();
+    const t0 = Date.now();
     setElapsedTime(0);
     timerRef.current = setInterval(() => {
-      setElapsedTime(Date.now() - startTs);
+      setElapsedTime(Date.now() - t0);
     }, 100);
   };
 
-  // 録画停止
   const stopRecording = () => {
     const rec = mediaRecorderRef.current;
     if (!rec) return;
@@ -125,7 +124,6 @@ const VideoRecorderWithTimer = ({
     clearInterval(timerRef.current);
   };
 
-  // ダウンロード
   const downloadRecording = () => {
     if (recordedChunks.length === 0) return;
     const blob = new Blob(recordedChunks, { type: "video/webm" });
@@ -137,7 +135,6 @@ const VideoRecorderWithTimer = ({
     URL.revokeObjectURL(url);
   };
 
-  // ストップウォッチ表示用フォーマット
   const formatTime = (ms) => {
     const totalSec = Math.floor(ms / 1000);
     const m = String(Math.floor(totalSec / 60)).padStart(2, "0");
@@ -148,7 +145,7 @@ const VideoRecorderWithTimer = ({
 
   return (
     <div>
-      {/* カメラ切り替えセレクト */}
+      {/* カメラ切り替え */}
       <div style={{ marginBottom: 10 }}>
         <label>
           カメラ：
@@ -157,13 +154,12 @@ const VideoRecorderWithTimer = ({
             onChange={(e) => setFacingMode(e.target.value)}
             style={{ marginLeft: 8 }}
           >
-            <option value="user">フロントカメラ</option>
-            <option value="environment">リアカメラ</option>
+            <option value="user">フロント</option>
+            <option value="environment">リア</option>
           </select>
         </label>
       </div>
 
-      {/* 非表示のカメラ入力 */}
       <video
         ref={videoInputRef}
         style={{ display: "none" }}
@@ -172,7 +168,6 @@ const VideoRecorderWithTimer = ({
         playsInline
       />
 
-      {/* プレビュー＆録画用キャンバス */}
       <canvas
         ref={canvasRef}
         style={{
@@ -182,7 +177,6 @@ const VideoRecorderWithTimer = ({
         }}
       />
 
-      {/* 録画コントロール */}
       <div style={{ margin: "10px 0" }}>
         {!isRecording ? (
           <button onClick={startRecording}>録画開始</button>
@@ -196,7 +190,6 @@ const VideoRecorderWithTimer = ({
         )}
       </div>
 
-      {/* ストップウォッチ */}
       <div style={{ fontFamily: "monospace", fontSize: "1.1em" }}>
         ストップウォッチ：{formatTime(elapsedTime)}
       </div>

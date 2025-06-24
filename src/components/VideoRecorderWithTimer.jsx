@@ -1,92 +1,77 @@
-// VideoRecorderWithTimer.jsx
 import React, { useRef, useState, useEffect } from "react";
 
 const VideoRecorderWithTimer = ({
-  width = 400,
-  lineColor = "lightgreen",
-  lineWidth = 2,
-  lineOpacity = 0.8,
-  fps = 30,
+  width = 400, // プレビュー横幅(px)
+  lineColor = "lightgreen", // 縦線の色
+  lineWidth = 2, // 縦線の太さ(px)
+  lineOpacity = 0.8, // 縦線の透過度(0〜1)
+  fps = 30, // プレビュー＆録画のFPS
   downloadFileName = "recording_with_line.webm",
-  onRecordingComplete, // 録画完了時に Blob を返すコールバック
+  onRecordingComplete, // 録画完了時に Blob を受け取るコールバック
 }) => {
-  const videoInputRef = useRef(null);
-  const canvasRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const timerRef = useRef(null);
+  const videoInputRef = useRef(null); // 非表示でカメラ映像を受け取る
+  const canvasRef = useRef(null); // 焼き込み＆プレビュー用
+  const mediaRecorderRef = useRef(null); // MediaRecorder インスタンス
+  const timerRef = useRef(null); // ストップウォッチ用 Interval
 
-  const [devices, setDevices] = useState([]); // videoinput デバイス一覧
-  const [selectedDevice, setSelectedDevice] = useState(""); // 選択中の deviceId
-
+  const [facingMode, setFacingMode] = useState("user"); // "user" or "environment"
   const [isRecording, setIsRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // 1) 起動直後にカメラ一覧を取得
+  // ——————————————
+  // カメラ切り替え or パラメータ変化時にストリームを再構築
   useEffect(() => {
-    navigator.mediaDevices
-      .enumerateDevices()
-      .then((deviceInfos) => {
-        const videoInputs = deviceInfos.filter((d) => d.kind === "videoinput");
-        setDevices(videoInputs);
-        if (!selectedDevice && videoInputs.length > 0) {
-          setSelectedDevice(videoInputs[0].deviceId);
-        }
-      })
-      .catch(console.error);
-  }, []);
+    let animationId = null;
+    let currentStream = null;
 
-  // 2) 選択カメラが変わるたびにストリームを再構築
-  useEffect(() => {
-    if (!selectedDevice) return;
-    let animationId;
-    let currentStream;
-
-    const setupStream = async () => {
-      // (a) 既存ストリームがあれば停止
+    async function setupStream() {
+      // 既存ストリームがあれば停止
       if (currentStream) {
         currentStream.getTracks().forEach((t) => t.stop());
       }
 
       try {
-        // (b) 選択中カメラ＋マイクで新ストリーム取得
+        // facingMode でカメラを指定
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: selectedDevice } },
+          video: { facingMode: { ideal: facingMode } },
           audio: true,
         });
         currentStream = stream;
 
-        // (c) 非表示 <video> にあてて再生し、サイズ取得
+        // 非表示 <video> にストリームをセット＆再生
         const vidIn = videoInputRef.current;
         vidIn.srcObject = stream;
+        vidIn.muted = true; // インライン自動再生許可のためミュート
+        vidIn.playsInline = true;
         await vidIn.play();
 
-        // (d) <canvas> を video サイズに合わせる
+        // <canvas> をビデオサイズに合わせる
         const canvas = canvasRef.current;
         canvas.width = vidIn.videoWidth;
         canvas.height = vidIn.videoHeight;
         const ctx = canvas.getContext("2d");
 
-        // (e) 毎フレーム、video→canvas→ライン描画
+        // 毎フレーム：映像→縦線を描画
         function drawFrame() {
           ctx.drawImage(vidIn, 0, 0, canvas.width, canvas.height);
           const x = (canvas.width - lineWidth) / 2;
           ctx.globalAlpha = lineOpacity;
           ctx.fillStyle = lineColor;
           ctx.fillRect(x, 0, lineWidth, canvas.height);
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = 1.0;
           animationId = requestAnimationFrame(drawFrame);
         }
         drawFrame();
 
-        // (f) canvas ストリーム + 音声で混合ストリームを作成
+        // canvas＋音声を混合したストリームを録画用に生成
         const canvasStream = canvas.captureStream(fps);
         const mixedStream = new MediaStream([
           ...canvasStream.getVideoTracks(),
           ...stream.getAudioTracks(),
         ]);
 
-        // (g) MediaRecorder 初期化
+        // MediaRecorder 初期化
         const recorder = new MediaRecorder(mixedStream, {
           mimeType: "video/webm; codecs=vp8,opus",
         });
@@ -103,9 +88,9 @@ const VideoRecorderWithTimer = ({
         };
         mediaRecorderRef.current = recorder;
       } catch (err) {
-        console.error("ストリームセットアップ失敗:", err);
+        console.error("カメラストリームのセットアップに失敗:", err);
       }
-    };
+    }
 
     setupStream();
 
@@ -113,15 +98,9 @@ const VideoRecorderWithTimer = ({
       if (animationId) cancelAnimationFrame(animationId);
       if (currentStream) currentStream.getTracks().forEach((t) => t.stop());
     };
-  }, [
-    selectedDevice,
-    fps,
-    lineColor,
-    lineWidth,
-    lineOpacity,
-    onRecordingComplete,
-  ]);
+  }, [facingMode, fps, lineColor, lineWidth, lineOpacity, onRecordingComplete]);
 
+  // ——————————————
   // 録画開始
   const startRecording = () => {
     const rec = mediaRecorderRef.current;
@@ -129,10 +108,11 @@ const VideoRecorderWithTimer = ({
     setRecordedChunks([]);
     rec.start();
     setIsRecording(true);
-    const t0 = Date.now();
+
+    const startTs = Date.now();
     setElapsedTime(0);
     timerRef.current = setInterval(() => {
-      setElapsedTime(Date.now() - t0);
+      setElapsedTime(Date.now() - startTs);
     }, 100);
   };
 
@@ -157,11 +137,11 @@ const VideoRecorderWithTimer = ({
     URL.revokeObjectURL(url);
   };
 
-  // mm:ss.cc フォーマット
+  // ストップウォッチ表示用フォーマット
   const formatTime = (ms) => {
-    const total = Math.floor(ms / 1000);
-    const m = String(Math.floor(total / 60)).padStart(2, "0");
-    const s = String(total % 60).padStart(2, "0");
+    const totalSec = Math.floor(ms / 1000);
+    const m = String(Math.floor(totalSec / 60)).padStart(2, "0");
+    const s = String(totalSec % 60).padStart(2, "0");
     const cs = String(Math.floor((ms % 1000) / 10)).padStart(2, "0");
     return `${m}:${s}.${cs}`;
   };
@@ -173,14 +153,12 @@ const VideoRecorderWithTimer = ({
         <label>
           カメラ：
           <select
-            value={selectedDevice}
-            onChange={(e) => setSelectedDevice(e.target.value)}
+            value={facingMode}
+            onChange={(e) => setFacingMode(e.target.value)}
+            style={{ marginLeft: 8 }}
           >
-            {devices.map((d, i) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || `Camera ${i + 1}`}
-              </option>
-            ))}
+            <option value="user">フロントカメラ</option>
+            <option value="environment">リアカメラ</option>
           </select>
         </label>
       </div>
@@ -189,6 +167,7 @@ const VideoRecorderWithTimer = ({
       <video
         ref={videoInputRef}
         style={{ display: "none" }}
+        autoPlay
         muted
         playsInline
       />

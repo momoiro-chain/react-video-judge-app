@@ -1,3 +1,4 @@
+// VideoRecorderWithTimer.jsx
 import React, { useRef, useState, useEffect } from "react";
 
 const VideoRecorderWithTimer = ({
@@ -5,9 +6,9 @@ const VideoRecorderWithTimer = ({
   lineColor = "lightgreen",
   lineWidth = 2,
   lineOpacity = 0.8,
-  fps = 30,
+  fps = 30, // プレビュー＆録画用 Canvas の FPS
   downloadFileName = "recording_with_line.webm",
-  onRecordingComplete, // Blob を親に渡すコールバック
+  onRecordingComplete, // 録画完了時に Blob を返すコールバック
 }) => {
   const videoInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -15,10 +16,12 @@ const VideoRecorderWithTimer = ({
   const timerRef = useRef(null);
 
   const [facingMode, setFacingMode] = useState("user"); // "user" or "environment"
+  const [cameraFrameRate, setCameraFrameRate] = useState(null); // 実際のカメラFPS
   const [isRecording, setIsRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState([]);
   const [elapsedTime, setElapsedTime] = useState(0);
 
+  // カメラストリームの取得／再構築
   useEffect(() => {
     let animationId;
     let currentStream;
@@ -30,27 +33,39 @@ const VideoRecorderWithTimer = ({
       }
 
       try {
-        // facingMode で前面／背面カメラを指定
+        // facingMode と frameRate を制約に指定
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode } },
+          video: {
+            facingMode: { ideal: facingMode },
+            frameRate: { ideal: fps },
+          },
           audio: true,
         });
         currentStream = stream;
 
-        // 非表示の <video> にセットして再生
+        // 実際に取れている FPS を取得
+        const [videoTrack] = stream.getVideoTracks();
+        if (videoTrack && videoTrack.getSettings) {
+          const settings = videoTrack.getSettings();
+          if (settings.frameRate) {
+            setCameraFrameRate(settings.frameRate);
+          }
+        }
+
+        // 非表示 <video> にセットして再生（ミュート＆インライン必須）
         const vidIn = videoInputRef.current;
         vidIn.srcObject = stream;
         vidIn.muted = true;
         vidIn.playsInline = true;
         await vidIn.play();
 
-        // <canvas> サイズ合わせ
+        // <canvas> をビデオサイズに合わせ
         const canvas = canvasRef.current;
         canvas.width = vidIn.videoWidth;
         canvas.height = vidIn.videoHeight;
         const ctx = canvas.getContext("2d");
 
-        // 毎フレーム、ビデオ＋縦線を描画
+        // 毎フレーム：ビデオ→縦線を描画
         function drawFrame() {
           ctx.drawImage(vidIn, 0, 0, canvas.width, canvas.height);
           const x = (canvas.width - lineWidth) / 2;
@@ -62,37 +77,31 @@ const VideoRecorderWithTimer = ({
         }
         drawFrame();
 
-        // canvas映像 + 音声を混合したストリームを生成
+        // canvas＋音声を混合したストリームを生成
         const canvasStream = canvas.captureStream(fps);
         const mixedStream = new MediaStream([
           ...canvasStream.getVideoTracks(),
           ...stream.getAudioTracks(),
         ]);
 
-        // MediaRecorder のローカルチャンク配列
-        const chunks = [];
+        // MediaRecorder 初期化
         const recorder = new MediaRecorder(mixedStream, {
           mimeType: "video/webm; codecs=vp8,opus",
         });
-
+        const chunks = [];
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) {
             chunks.push(e.data);
             setRecordedChunks([...chunks]);
           }
         };
-
         recorder.onstop = () => {
-          // 録画終了時に最新のチャンクから Blob を作成
           const blob = new Blob(chunks, { type: "video/webm" });
-          if (onRecordingComplete) {
-            onRecordingComplete(blob);
-          }
+          if (onRecordingComplete) onRecordingComplete(blob);
         };
-
         mediaRecorderRef.current = recorder;
       } catch (err) {
-        console.error("ストリームセットアップ失敗:", err);
+        console.error("カメラストリームのセットアップに失敗:", err);
       }
     }
 
@@ -103,19 +112,21 @@ const VideoRecorderWithTimer = ({
     };
   }, [facingMode, fps, lineColor, lineWidth, lineOpacity, onRecordingComplete]);
 
+  // 録画開始
   const startRecording = () => {
     const rec = mediaRecorderRef.current;
     if (!rec) return;
     setRecordedChunks([]);
     rec.start();
     setIsRecording(true);
-    const t0 = Date.now();
+    const startTs = Date.now();
     setElapsedTime(0);
     timerRef.current = setInterval(() => {
-      setElapsedTime(Date.now() - t0);
+      setElapsedTime(Date.now() - startTs);
     }, 100);
   };
 
+  // 録画停止
   const stopRecording = () => {
     const rec = mediaRecorderRef.current;
     if (!rec) return;
@@ -124,8 +135,9 @@ const VideoRecorderWithTimer = ({
     clearInterval(timerRef.current);
   };
 
+  // ダウンロード
   const downloadRecording = () => {
-    if (recordedChunks.length === 0) return;
+    if (!recordedChunks.length) return;
     const blob = new Blob(recordedChunks, { type: "video/webm" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -135,6 +147,7 @@ const VideoRecorderWithTimer = ({
     URL.revokeObjectURL(url);
   };
 
+  // ストップウォッチ表示フォーマット
   const formatTime = (ms) => {
     const totalSec = Math.floor(ms / 1000);
     const m = String(Math.floor(totalSec / 60)).padStart(2, "0");
@@ -160,6 +173,7 @@ const VideoRecorderWithTimer = ({
         </label>
       </div>
 
+      {/* 非表示のカメラ入力 */}
       <video
         ref={videoInputRef}
         style={{ display: "none" }}
@@ -168,6 +182,7 @@ const VideoRecorderWithTimer = ({
         playsInline
       />
 
+      {/* プレビュー＆録画用キャンバス */}
       <canvas
         ref={canvasRef}
         style={{
@@ -177,6 +192,7 @@ const VideoRecorderWithTimer = ({
         }}
       />
 
+      {/* 録画コントロール */}
       <div style={{ margin: "10px 0" }}>
         {!isRecording ? (
           <button onClick={startRecording}>録画開始</button>
@@ -190,8 +206,12 @@ const VideoRecorderWithTimer = ({
         )}
       </div>
 
+      {/* ストップウォッチ ＋ カメラFPS表示 */}
       <div style={{ fontFamily: "monospace", fontSize: "1.1em" }}>
         ストップウォッチ：{formatTime(elapsedTime)}
+        <br />
+        カメラFPS：
+        {cameraFrameRate !== null ? cameraFrameRate.toFixed(1) : "取得中…"}
       </div>
     </div>
   );

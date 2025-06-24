@@ -1,62 +1,60 @@
 import React, { useState, useRef, useEffect } from "react";
 
 const VideoPlayer = ({
-  src: videoSrcProp = null, // App.jsx から渡される録画URL
-  onClick, // クリック時に (e, videoEl) を呼び出し
-  initialFrameRate = 30, // 初期フレームレート
+  videoFile = null, // Blob を受け取る
+  onClick,
+  initialFrameRate = 30,
 }) => {
   const videoRef = useRef(null);
 
-  const [videoSrc, setVideoSrc] = useState(videoSrcProp);
+  const [videoSrc, setVideoSrc] = useState(null);
   const [videoDuration, setVideoDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [frameRate, setFrameRate] = useState(initialFrameRate);
 
-  const currentFrame = Math.floor(currentTime * frameRate);
-  const totalFrames = Math.floor(videoDuration * frameRate);
-
-  // App.jsx から渡された src が変わったら再セット
+  // videoFile が来たら自動ロード
   useEffect(() => {
-    if (videoSrcProp) {
-      // 以前の URL がオブジェクト URL なら解放
+    if (videoFile) {
+      // 既存 blob URL 解放
       if (videoSrc && videoSrc.startsWith("blob:")) {
         URL.revokeObjectURL(videoSrc);
       }
-      setVideoSrc(videoSrcProp);
+      const url = URL.createObjectURL(videoFile);
+      setVideoSrc(url);
       setCurrentTime(0);
+      setVideoDuration(0);
       setIsPlaying(false);
     }
-  }, [videoSrcProp]);
+  }, [videoFile]);
 
-  // --- ファイル選択で動画を開く ---
+  const currentFrame = Math.floor(currentTime * frameRate);
+  const totalFrames = Math.floor(videoDuration * frameRate);
+
+  // ファイル選択で上書き
   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    // 既存のオブジェクトURLを解放
+    const f = e.target.files[0];
+    if (!f) return;
     if (videoSrc && videoSrc.startsWith("blob:")) {
       URL.revokeObjectURL(videoSrc);
     }
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(f);
     setVideoSrc(url);
     setCurrentTime(0);
     setVideoDuration(0);
     setIsPlaying(false);
   };
 
-  // --- メタデータ読み込み ---
   const handleLoadedMetadata = () => {
     const v = videoRef.current;
     if (v) setVideoDuration(v.duration);
   };
 
-  // --- 再生時間更新 ---
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (v) setCurrentTime(v.currentTime);
   };
 
-  // --- 再生 / 一時停止 ---
   const handlePlayPause = async () => {
     const v = videoRef.current;
     if (!v) return;
@@ -73,7 +71,6 @@ const VideoPlayer = ({
     }
   };
 
-  // --- シークバー操作 ---
   const handleSeekChange = (e) => {
     const v = videoRef.current;
     if (v && v.duration) {
@@ -84,7 +81,6 @@ const VideoPlayer = ({
     }
   };
 
-  // --- 前後フレーム移動 ---
   const handlePrevFrame = () => {
     const v = videoRef.current;
     if (v) v.currentTime = Math.max(0, v.currentTime - 1 / frameRate);
@@ -94,39 +90,32 @@ const VideoPlayer = ({
     if (v) v.currentTime = Math.min(v.duration, v.currentTime + 1 / frameRate);
   };
 
-  // --- フレームレート変更 ---
   const handleFrameRateChange = (e) => {
     setFrameRate(Number(e.target.value));
   };
 
-  // --- クリックイベントを親に伝搬 ---
   const handleVideoContainerClick = (e) => {
     if (onClick && videoRef.current) {
       onClick(e, videoRef.current);
     }
   };
 
-  // --- 時間フォーマット mm:ss.mmm ---
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60)
-      .toString()
-      .padStart(2, "0");
-    const ms = Math.floor((seconds % 1) * 1000)
-      .toString()
-      .padStart(3, "0");
+    const s = String(Math.floor(seconds % 60)).padStart(2, "0");
+    const ms = String(Math.floor((seconds % 1) * 1000)).padStart(3, "0");
     return `${m}:${s}.${ms}`;
   };
 
   return (
     <div>
-      {/* ファイルアップロード */}
+      {/* ファイルアップロードも可能 */}
       <div style={{ marginBottom: 12 }}>
         <input type="file" accept="video/*" onChange={handleFileChange} />
       </div>
 
-      {/* 動画表示エリア */}
-      <div className="video-container" onClick={handleVideoContainerClick}>
+      {/* 動画表示 */}
+      <div onClick={handleVideoContainerClick}>
         <video
           ref={videoRef}
           src={videoSrc || undefined}
@@ -138,7 +127,7 @@ const VideoPlayer = ({
       </div>
 
       {/* 再生コントロール */}
-      <div className="video-controls" style={{ marginTop: 8 }}>
+      <div style={{ marginTop: 8 }}>
         <button onClick={handlePlayPause}>
           {isPlaying ? "Pause" : "Play"}
         </button>
@@ -153,7 +142,7 @@ const VideoPlayer = ({
       </div>
 
       {/* フレーム操作 */}
-      <div className="frame-controls" style={{ marginTop: 8 }}>
+      <div style={{ marginTop: 8 }}>
         <button onClick={handlePrevFrame} disabled={currentFrame <= 0}>
           ◀Prev Frame
         </button>

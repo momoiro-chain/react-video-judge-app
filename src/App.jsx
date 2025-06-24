@@ -3,7 +3,7 @@ import VideoRecorderWithTimer from "./components/VideoRecorderWithTimer";
 import VideoPlayer from "./components/videoPlayer";
 
 function App() {
-  const [recordedUrl, setRecordedUrl] = useState(null);
+  const [recordedBlob, setRecordedBlob] = useState(null);
 
   return (
     <div style={{ padding: 20 }}>
@@ -16,14 +16,16 @@ function App() {
         lineOpacity={0.7}
         fps={24}
         downloadFileName="my_recording.webm"
-        onRecordingComplete={(url) => setRecordedUrl(url)}
+        onRecordingComplete={(blob) => {
+          setRecordedBlob(blob);
+        }}
       />
 
-      {recordedUrl && (
+      {recordedBlob && (
         <div style={{ marginTop: 40 }}>
           <h2>録画結果プレビュー</h2>
           <VideoPlayer
-            src={recordedUrl}
+            videoFile={recordedBlob}
             initialFrameRate={24}
             onClick={(e, videoEl) => {
               console.log("Video clicked at", e.clientX, e.clientY);
